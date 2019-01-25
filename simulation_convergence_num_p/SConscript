@@ -1,0 +1,145 @@
+import os
+
+from os.path import join
+import nestly
+import nestly.scons as ns
+import SCons.Script as sc
+
+import numpy as np
+from common import make_params
+
+sc.Import('env')
+localenv = env.Clone()
+SETTINGS = {
+    25: {
+        "hidden_sizes": "4",
+        "group_lassos": "0.1",
+        "lasso_ratios": "0.1",
+        "ridge_params": "0.002",
+    },
+    50: {
+        "hidden_sizes": "4",
+        "group_lassos": "0.15",
+        "lasso_ratios": "0.1",
+        "ridge_params": "0.002",
+    },
+    100: {
+        "hidden_sizes": "4",
+        "group_lassos": "0.2",
+        "lasso_ratios": "0.1",
+        "ridge_params": "0.002",
+    },
+    200: {
+        "hidden_sizes": "4",
+        "group_lassos": "0.25",
+        "lasso_ratios": "0.1",
+        "ridge_params": "0.002",
+    },
+    400: {
+        "hidden_sizes": "4",
+        "group_lassos": "0.3",
+        "lasso_ratios": "0.1",
+        "ridge_params": "0.002",
+    },
+}
+
+nest = ns.SConsWrap(nestly.Nest(), '_output', alias_environment=localenv)
+
+nest.add(
+    'seed',
+    range(1),
+    label_func=lambda q: 'seed_%d' % q)
+
+nest.add(
+    'num_train',
+    [200],
+    label_func=lambda q: 'num_train_%d' % q)
+
+nest.add(
+    'num_p',
+    [25,50,100,200,400],
+    label_func=lambda q: 'num_p_%d' % q)
+
+@nest.add_target_with_env(localenv)
+def make_data(env, outdir, c):
+    cmd = [
+        'python3 generate_data.py',
+        '--seed',
+        c['seed'],
+        '--func-name',
+        'six_variable_nn_func',
+        '--n-train',
+        c['num_train'],
+        '--n-test',
+        2000,
+        '--num-p',
+        c['num_p'],
+        '--out-file ${TARGETS[0]}'
+    ]
+    return env.Command([
+            join(outdir, 'data.pkl')
+        ],
+        [],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_spinn(env, outdir, c):
+    MAX_ITERS = 20000
+    NUM_INITS = 2
+    NUM_BAYES_INITS = 10
+    NUM_BAYES_ITERS = 30
+    NUM_JOBS = 3
+    cmd = [
+        'python3 fit_spinn.py',
+        '--seed',
+        c['seed'],
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+        '--summary-file ${TARGETS[1]}',
+        '--log-file ${TARGETS[2]}',
+        '--lasso-param-ratios',
+        SETTINGS[c['num_p']]["lasso_ratios"],
+        '--group-lasso-params',
+        SETTINGS[c['num_p']]["group_lassos"],
+        '--ridge-params',
+        SETTINGS[c['num_p']]["ridge_params"],
+        '--hidden-size-options',
+        SETTINGS[c['num_p']]["hidden_sizes"],
+        '--data-classes 0',
+        '--kfold 3',
+        '--max-iters',
+        MAX_ITERS,
+        '--num-inits',
+        NUM_INITS,
+        '--num-jobs',
+        NUM_JOBS,
+        '--learn-rate',
+        0.01,
+        '--bayes-opt',
+        '--num-bayes-inits',
+        NUM_BAYES_INITS,
+        '--num-bayes-iters',
+        NUM_BAYES_ITERS,
+    ]
+    return env.Command([
+            join(outdir, 'fitted_spinn.pkl'),
+            join(outdir, 'fitted_spinn.csv'),
+            join(outdir, 'log.txt')
+        ],
+        c['make_data'],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_gam(env, outdir, c):
+    cmd = [
+        'python3 fit_gam.py',
+        '--seed',
+        c['seed'],
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+    ]
+    return env.Command([
+            join(outdir, 'fitted_gam.csv'),
+        ],
+        c['make_data'],
+        ' '.join(map(str, cmd)))

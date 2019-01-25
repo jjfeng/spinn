@@ -1,0 +1,187 @@
+import os
+
+from os.path import join
+import nestly
+import nestly.scons as ns
+import SCons.Script as sc
+
+import numpy as np
+from common import make_params
+
+sc.Import('env')
+localenv = env.Clone()
+
+KFOLD = 5
+
+nest = ns.SConsWrap(nestly.Nest(), '_output', alias_environment=localenv)
+
+nest.add(
+    'seed',
+    range(1),
+    label_func=lambda q: 'seed_%d' % q)
+
+@nest.add_target_with_env(localenv)
+def read_data(env, outdir, c):
+    cmd = [
+        'python3 read_data.py',
+        '--seed',
+        c['seed'],
+        '--center-y',
+        '--in-file',
+        '../data/riboflavin.csv',
+        '--out-file ${TARGETS[0]}'
+    ]
+    return env.Command([
+            join(outdir, 'data.pkl')
+        ],
+        [],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_SpAM(env, outdir, c):
+    cmd = [
+        'python3 fit_SpAM.py',
+        '--seed',
+        c['seed'],
+        '--kfold',
+        KFOLD,
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+    ]
+    return env.Command([
+            join(outdir, 'fitted_spam.csv'),
+        ],
+        c['read_data'],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_trees(env, outdir, c):
+    cmd = [
+        'python3 fit_trees.py',
+        '--seed',
+        c['seed'],
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+        '--data-classes 0'
+    ]
+    return env.Command([
+            join(outdir, 'fitted_trees.csv'),
+        ],
+        c['read_data'],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_lasso(env, outdir, c):
+    cmd = [
+        'python3 fit_lasso.py',
+        '--seed',
+        c['seed'],
+        '--kfold',
+        KFOLD,
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+    ]
+    return env.Command([
+            join(outdir, 'fitted_lasso.csv'),
+        ],
+        c['read_data'],
+        ' '.join(map(str, cmd)))
+
+nest.add(
+    'is_relu',
+    [0],
+    label_func=lambda q: 'relu_%d' % q)
+
+nest.add(
+    'hidden_layer_sizes',
+    ["10,10:2,10:4"],
+    label_func=lambda q: 'layer_%s' % q)
+
+@nest.add_target_with_env(localenv)
+def fit_spinn(env, outdir, c):
+    MAX_ITERS = 20000
+    NUM_INITS = 3
+    NUM_BAYES_INITS = 10
+    NUM_BAYES_ITERS = 30
+    NUM_JOBS = KFOLD
+    cmd = [
+        'python3 fit_spinn.py',
+        '--seed',
+        c['seed'],
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+        '--summary-file ${TARGETS[1]}',
+        '--log-file ${TARGETS[2]}',
+        '--is-relu',
+        c['is_relu'],
+        '--lasso-param-ratios',
+        make_params(np.power(10, np.arange(-.5, -2, step=-.5))),
+        '--group-lasso-params',
+        make_params(np.power(10, np.arange(-.25, -2, step=-.5))),
+        '--ridge-params 0.0001',
+        '--hidden-size-options',
+        c['hidden_layer_sizes'],
+        '--data-classes 0',
+        '--kfold',
+        KFOLD,
+        '--max-iters',
+        MAX_ITERS,
+        '--num-inits',
+        NUM_INITS,
+        '--num-jobs',
+        NUM_JOBS,
+        '--learn-rate',
+        0.01,
+        '--num-bayes-inits',
+        NUM_BAYES_INITS,
+        '--num-bayes-iters',
+        NUM_BAYES_ITERS,
+    ]
+    return env.Command([
+            join(outdir, 'fitted_spinn.pkl'),
+            join(outdir, 'fitted_spinn.csv'),
+            join(outdir, 'log.txt')
+        ],
+        c['read_data'],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_ridge_nn(env, outdir, c):
+    MAX_ITERS = 20000
+    NUM_INITS = 3
+    NUM_JOBS = KFOLD
+    cmd = [
+        'python3 fit_spinn.py',
+        '--seed',
+        c['seed'],
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+        '--summary-file ${TARGETS[1]}',
+        '--log-file ${TARGETS[2]}',
+        '--is-relu',
+        c['is_relu'],
+        '--lasso-param-ratios 0',
+        '--group-lasso-params 0',
+        '--ridge-params',
+        make_params(np.power(10.0, np.arange(-1, -5, step=-1))),
+        '--hidden-size-options',
+        c['hidden_layer_sizes'],
+        '--data-classes 0',
+        '--kfold',
+        KFOLD,
+        '--max-iters',
+        MAX_ITERS,
+        '--num-inits',
+        NUM_INITS,
+        '--num-jobs',
+        NUM_JOBS,
+        '--learn-rate',
+        0.01,
+    ]
+    return env.Command([
+            join(outdir, 'fitted_ridge_nn.pkl'),
+            join(outdir, 'fitted_ridge_nn.csv'),
+            join(outdir, 'log_ridge_nn.txt')
+        ],
+        c['read_data'],
+        ' '.join(map(str, cmd)))

@@ -1,0 +1,318 @@
+import os
+
+from os.path import join
+import nestly
+import nestly.scons as ns
+import SCons.Script as sc
+
+import numpy as np
+from common import make_params
+
+sc.Import('env')
+localenv = env.Clone()
+
+SETTINGS = {
+    125: {
+        "hidden_sizes": "10",
+        "group_lassos": "0.03",
+        "lasso_ratios": make_params(np.power(10, np.arange(-.5, -2, step=-.5))),
+        "ridge_params": "0.0002",
+    },
+    250: {
+        "hidden_sizes": "10",
+        "group_lassos": "0.03",
+        "lasso_ratios": make_params(np.power(10, np.arange(-.5, -2, step=-.5))),
+        "ridge_params": "0.0002",
+    },
+    500: {
+        "hidden_sizes": "15",
+        "group_lassos": "0.04",
+        "lasso_ratios": make_params(np.power(10, np.arange(-.5, -2, step=-.5))),
+        "ridge_params": "0.0002",
+    },
+    1000: {
+        "hidden_sizes": "15",
+        "group_lassos": "0.02",
+        "lasso_ratios": make_params(np.power(10, np.arange(-.5, -2.5, step=-.5))),
+        "ridge_params": "0.0002",
+    },
+    2000: {
+        "hidden_sizes": "15:5",
+        "group_lassos": "0.02",
+        "lasso_ratios": make_params(np.power(10, np.arange(-.5, -2.5, step=-.5))),
+        "ridge_params": "0.0002",
+    }
+}
+
+RIDGE_SETTINGS = {
+    125: {
+        "hidden_sizes": "5,10",
+        "ridge_params": make_params(np.power(10, np.arange(.5, -4, step=-1))),
+    },
+    250: {
+        "hidden_sizes": "5,10",
+        "ridge_params": make_params(np.power(10, np.arange(.5, -4, step=-1))),
+    },
+    500: {
+        "hidden_sizes": "5,10",
+        "ridge_params": make_params(np.power(10, np.arange(.5, -4, step=-1))),
+    },
+    1000: {
+        "hidden_sizes": "5,10",
+        "ridge_params": make_params(np.power(10, np.arange(.5, -4, step=-1))),
+    },
+    2000: {
+        "hidden_sizes": "5,10",
+        "ridge_params": make_params(np.power(10, np.arange(.5, -4, step=-1))),
+    }
+}
+ORACLE_SETTINGS = {
+    125: {
+        "hidden_sizes": "20,20:5",
+        "ridge_params": make_params(np.power(10, np.arange(-.5, -5, step=-1))),
+    },
+    250: {
+        "hidden_sizes": "25,20:5",
+        "ridge_params": make_params(np.power(10, np.arange(-.5, -5, step=-1))),
+    },
+    500: {
+        "hidden_sizes": "30,20:10",
+        "ridge_params": make_params(np.power(10, np.arange(-.5, -5, step=-1))),
+    },
+    1000: {
+        "hidden_sizes": "35,20:15",
+        "ridge_params": make_params(np.power(10, np.arange(-.5, -5, step=-1))),
+    },
+    2000: {
+        "hidden_sizes": "40,20:10,20:20",
+        "ridge_params": make_params(np.power(10, np.arange(-.5, -5, step=-1))),
+    }
+}
+
+
+nest = ns.SConsWrap(nestly.Nest(), '_output', alias_environment=localenv)
+
+nest.add(
+    'seed',
+    range(1),
+    label_func=lambda q: 'seed_%d' % q)
+
+nest.add(
+    'n_train',
+    [125, 250, 500, 1000, 2000],
+    label_func=lambda q: 'n_train_%d' % q)
+
+@nest.add_target_with_env(localenv)
+def make_data(env, outdir, c):
+    cmd = [
+        'python3 generate_data.py',
+        '--seed',
+        c['seed'],
+        '--func-name',
+        'six_variable_additive_func',
+        '--n-train',
+        c['n_train'],
+        '--n-test',
+        2000,
+        '--out-file ${TARGETS[0]}'
+    ]
+    return env.Command([
+            join(outdir, 'data.pkl')
+        ],
+        [],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_spinn(env, outdir, c):
+    MAX_ITERS = 20000
+    NUM_INITS = 2
+    NUM_BAYES_INITS = 6
+    NUM_BAYES_ITERS = 20
+    NUM_JOBS = 3
+    cmd = [
+        'python3 fit_spinn.py',
+        '--seed',
+        c['seed'],
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+        '--summary-file ${TARGETS[1]}',
+        '--log-file ${TARGETS[2]}',
+        '--lasso-param-ratios',
+        SETTINGS[c['n_train']]["lasso_ratios"],
+        '--group-lasso-params',
+        SETTINGS[c['n_train']]["group_lassos"],
+        '--ridge-params',
+        SETTINGS[c['n_train']]["ridge_params"],
+        '--hidden-size-options',
+        SETTINGS[c['n_train']]["hidden_sizes"],
+        '--data-classes 0',
+        '--kfold 3',
+        '--max-iters',
+        MAX_ITERS,
+        '--num-inits',
+        NUM_INITS,
+        '--num-jobs',
+        NUM_JOBS,
+        '--learn-rate',
+        0.01,
+    ]
+    return env.Command([
+            join(outdir, 'fitted_spinn.pkl'),
+            join(outdir, 'fitted_spinn.csv'),
+            join(outdir, 'log.txt')
+        ],
+        c['make_data'],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_SpAM(env, outdir, c):
+    cmd = [
+        'python3 fit_SpAM.py',
+        '--seed',
+        c['seed'],
+        '--kfold 3',
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+    ]
+    return env.Command([
+            join(outdir, 'fitted_spam.csv'),
+        ],
+        c['make_data'],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_trees(env, outdir, c):
+    cmd = [
+        'python3 fit_trees.py',
+        '--seed',
+        c['seed'],
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+        '--data-classes 0'
+    ]
+    return env.Command([
+            join(outdir, 'fitted_trees.csv'),
+        ],
+        c['make_data'],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_lasso(env, outdir, c):
+    cmd = [
+        'python3 fit_lasso.py',
+        '--seed',
+        c['seed'],
+        '--kfold 3',
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+    ]
+    return env.Command([
+            join(outdir, 'fitted_lasso.csv'),
+        ],
+        c['make_data'],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_gam(env, outdir, c):
+    cmd = [
+        'python3 fit_gam.py',
+        '--seed',
+        c['seed'],
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+    ]
+    return env.Command([
+            join(outdir, 'fitted_gam.csv'),
+        ],
+        c['make_data'],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_ridge(env, outdir, c):
+    MAX_ITERS = 20000
+    NUM_INITS = 2
+    NUM_JOBS = 3
+    cmd = [
+        'python3 fit_spinn.py',
+        '--seed',
+        c['seed'],
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+        '--summary-file ${TARGETS[1]}',
+        '--log-file ${TARGETS[2]}',
+        '--lasso-param-ratios 0',
+        '--group-lasso-params 0',
+        '--ridge-params',
+        RIDGE_SETTINGS[c['n_train']]["ridge_params"],
+        '--hidden-size-options',
+        RIDGE_SETTINGS[c['n_train']]["hidden_sizes"],
+        '--data-classes 0',
+        '--kfold 3',
+        '--max-iters',
+        MAX_ITERS,
+        '--num-inits',
+        NUM_INITS,
+        '--num-jobs',
+        NUM_JOBS,
+        '--learn-rate',
+        0.01,
+    ]
+    return env.Command([
+            join(outdir, 'fitted_ridge_nn.pkl'),
+            join(outdir, 'fitted_ridge_nn.csv'),
+            join(outdir, 'log_ridge_nn.txt')
+        ],
+        c['make_data'],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def make_restrict_data(env, outdir, c):
+    cmd = [
+        'python3 restrict_data.py',
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+        '--max-relevant-idx 6'
+    ]
+    return env.Command([
+            join(outdir, 'restrict_data.pkl')
+        ],
+        c['make_data'],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_oracle_nn(env, outdir, c):
+    MAX_ITERS = 20000
+    NUM_INITS = 2
+    NUM_JOBS = 3
+    cmd = [
+        'python3 fit_spinn.py',
+        '--seed',
+        c['seed'],
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+        '--summary-file ${TARGETS[1]}',
+        '--log-file ${TARGETS[2]}',
+        '--lasso-param-ratios 0',
+        '--group-lasso-params 0',
+        '--ridge-params',
+        ORACLE_SETTINGS[c['n_train']]["ridge_params"],
+        '--hidden-size-options',
+        ORACLE_SETTINGS[c['n_train']]["hidden_sizes"],
+        '--data-classes 0',
+        '--kfold 3',
+        '--max-iters',
+        MAX_ITERS,
+        '--num-inits',
+        NUM_INITS,
+        '--num-jobs',
+        NUM_JOBS,
+        '--learn-rate',
+        0.01,
+    ]
+    return env.Command([
+            join(outdir, 'fitted_oracle_nn.pkl'),
+            join(outdir, 'fitted_oracle_nn.csv'),
+            join(outdir, 'log_oracle_nn.txt')
+        ],
+        c['make_restrict_data'],
+        ' '.join(map(str, cmd)))

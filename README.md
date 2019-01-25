@@ -3,13 +3,15 @@
 ## Installation:
 Install Tensorflow (python).
 
-## Running:
-To perform classification on a dataset, use `spinn_classification.py`.
-For regression on a dataset, use `spinn_regression.py`.
-There will be two output files: one is the log file and one is the fitted models.
-The fitted models will be a list of all the fitted models throughout the training process.
-The last one in the list is the final fitted model.
-The fitted models are represented by the `NeuralNetworkResult` class.
+Code was run using python 3.4.3
 
-For an example for how to perform simulations on the data, look at `spinn_simulation.py`.
-There will be three output files: the log file, the fitted models, and the simulated data.
+## Primary files:
+* `read_data.py`: make a dataset in the correct format
+* `fit_spinn.py`: main file for fitting SPINN!
+* `fit_<other_methods>.py`: fit using other methods
+
+## Simulations and data analyses
+Each folder specifies the simulation or data analyses. Each folder is associated with its own plotting code via `plot_<folder_name>.py`. To run the simulations/data analyses, use scons.
+
+Note: `process_peptide_binding.py`: Processes data downloaded from https://github.com/openvax/mhcflurry
+

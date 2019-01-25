@@ -26,7 +26,7 @@ class ParallelWorker:
         try:
             result = self.run_worker()
         except Exception as e:
-            print "Exception caught in parallel worker: %s" % e
+            print("Exception caught in parallel worker: %s", e)
             traceback.print_exc()
         return result
 
@@ -67,14 +67,14 @@ class MultiprocessingManager(ParallelWorkerManager):
         try:
             results_raw = self.pool.map(run_multiprocessing_worker, self.worker_list)
         except Exception as e:
-            print "Error occured when trying to process workers in parallel: %s" % e
+            print("Error occured when trying to process workers in parallel: %s", e)
             # Just do it all one at a time instead
             results_raw = map(run_multiprocessing_worker, self.worker_list)
 
         results = []
         for i, r in enumerate(results_raw):
             if r is None:
-                print "WARNING: multiprocessing worker for this worker failed: %s" % self.worker_list[i]
+                print("WARNING: multiprocessing worker for this worker failed: %s", self.worker_list[i])
             else:
                 results.append(r)
         return results

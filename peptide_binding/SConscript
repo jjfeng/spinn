@@ -1,0 +1,260 @@
+"""
+https://openvax.github.io/mhcflurry/models.html
+"""
+import os
+
+from os.path import join
+import nestly
+import nestly.scons as ns
+import SCons.Script as sc
+
+import numpy as np
+from common import make_params
+
+sc.Import('env')
+localenv = env.Clone()
+
+KFOLD = 4
+
+nest = ns.SConsWrap(nestly.Nest(), '_output', alias_environment=localenv)
+
+HLA_hyperparams = {
+    "HLA-A_01:01": {
+        "hidden_layers": "45:10,45:20",
+        "group_lasso": make_params(np.power(10, np.arange(-1, -3, step=-.1))),
+        "lasso": make_params(np.power(10, np.arange(-.25, -3, step=-.1))),
+        "bayes": True
+    },
+    "HLA-B_08:02": {
+        "hidden_layers": "45,45:5",
+        "group_lasso": make_params(np.power(10, np.arange(-1, -3, step=-.1))),
+        "lasso": make_params(np.power(10, np.arange(-.5, -2.5, step=-.1))),
+        "bayes": True
+    },
+    "HLA-B_44:02": {
+        "hidden_layers": "30,30:5",
+        "group_lasso": make_params(np.power(10, np.arange(-.5, -3, step=-.1))),
+        "lasso": make_params(np.power(10, np.arange(-.25, -3, step=-.1))),
+        "bayes": True
+    }
+}
+
+RIDGE_HLA_hyperparams = {
+    "HLA-A_01:01": {
+        "hidden_layers": "20,45,45:10",
+    },
+    "HLA-B_08:02": {
+        "hidden_layers": "20,45,45:10",
+    },
+    "HLA-B_44:02": {
+        "hidden_layers": "20,45,45:10",
+    },
+}
+
+
+nest.add(
+    'hla',
+    [
+        "HLA-A_01:01",
+	"HLA-B_08:02",
+	"HLA-B_44:02",
+    ])
+
+nest.add(
+    'extractor',
+    [1],
+    label_func=lambda q: 'extractor_%d' % q)
+
+nest.add(
+    'prop',
+    [0.2],
+    label_func=lambda q: 'prop_%.2f' % q)
+
+nest.add(
+    'seed',
+    range(1),
+    label_func=lambda q: 'seed_%d' % q)
+
+@nest.add_target_with_env(localenv)
+def read_data(env, outdir, c):
+    cmd = [
+        'python3 read_data.py',
+        '--in-file',
+        '../data/%s_processed.csv' % c["hla"],
+        '--center-y',
+        '--scale-y',
+        '--out-file ${TARGETS[0]}',
+        '--test-pro',
+        c['prop'],
+        '--seed',
+        c['seed']
+    ]
+    return env.Command([
+            join(outdir, 'data.pkl'),
+        ],
+        [],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_SpAM(env, outdir, c):
+    cmd = [
+        'python3 fit_SpAM.py',
+        '--seed',
+        c['seed'],
+        '--kfold',
+        KFOLD,
+        '--data-class 0',
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+    ]
+    return env.Command([
+            join(outdir, 'fitted_spam.csv'),
+        ],
+        c['read_data'],
+        ' '.join(map(str, cmd)))
+@nest.add_target_with_env(localenv)
+def fit_lasso(env, outdir, c):
+    cmd = [
+        'python3 fit_lasso.py',
+        '--seed',
+        c['seed'],
+        '--kfold',
+        KFOLD,
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+        '--log-file ${TARGETS[1]}',
+    ]
+    return env.Command([
+            join(outdir, 'fitted_lasso.csv'),
+            join(outdir, 'log_lasso.txt'),
+        ],
+        c['read_data'],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_trees(env, outdir, c):
+    cmd = [
+        'python3 fit_trees.py',
+        '--seed',
+        c['seed'],
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+        '--log-file ${TARGETS[1]}',
+        '--data-classes 0'
+    ]
+    return env.Command([
+            join(outdir, 'fitted_trees.csv'),
+            join(outdir, 'log_trees.txt'),
+        ],
+        c['read_data'],
+        ' '.join(map(str, cmd)))
+
+nest.add(
+    'is_relu',
+    [0],
+    label_func=lambda q: 'relu_%d' % q)
+
+nest.add(
+    'hidden_layers',
+    ["45", "45:10", "45:20"],
+    label_func=lambda q: 'layer_%s' % q)
+
+nest.add(
+    'group_lasso',
+    np.power(10, np.arange(-2.5, -3.5, step=-.5)).tolist(),
+    label_func=lambda q: 'group_%.3f' % q)
+
+nest.add(
+    'lasso',
+    np.power(10, np.arange(-.5, -3.5, step=-.5)).tolist(),
+    label_func=lambda q: 'lasso_%.3f' % q)
+
+@nest.add_target_with_env(localenv)
+def fit_spinn(env, outdir, c):
+    MAX_ITERS = 20000
+    NUM_INITS = 1
+    NUM_BAYES_INITS = 10
+    NUM_BAYES_ITERS = 20
+    NUM_JOBS = KFOLD
+    cmd = [
+        'python3 fit_spinn.py',
+        '--seed',
+        c['seed'],
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+        '--summary-file ${TARGETS[1]}',
+        '--log-file ${TARGETS[2]}',
+        '--is-relu',
+        c['is_relu'],
+        '--lasso-param-ratios',
+	HLA_hyperparams[c['hla']]['lasso'],
+        '--group-lasso-params',
+	HLA_hyperparams[c['hla']]['group_lasso'],
+        '--ridge-params 0.0001',
+        '--hidden-size-options',
+	HLA_hyperparams[c['hla']]['hidden_layers'],
+        '--data-classes 0',
+        '--kfold',
+        KFOLD,
+        '--max-iters',
+        MAX_ITERS,
+        '--num-inits',
+        NUM_INITS,
+        '--num-jobs',
+        NUM_JOBS,
+        '--learn-rate',
+        0.01,
+        '--bayes-opt' if HLA_hyperparams[c['hla']]['bayes'] else '',
+        '--num-bayes-inits',
+        NUM_BAYES_INITS,
+        '--num-bayes-iters',
+        NUM_BAYES_ITERS,
+    ]
+    return env.Command([
+            join(outdir, 'fitted_spinn_final.pkl'),
+            join(outdir, 'fitted_spinn_final.csv'),
+            join(outdir, 'log_final.txt')
+        ],
+        c['read_data'],
+        ' '.join(map(str, cmd)))
+
+@nest.add_target_with_env(localenv)
+def fit_ridge_nn(env, outdir, c):
+    MAX_ITERS = 20000
+    NUM_INITS = 2
+    NUM_JOBS = 3
+    cmd = [
+        'python3 fit_spinn.py',
+        '--seed',
+        c['seed'],
+        '--data-file ${SOURCES[0]}',
+        '--out-file ${TARGETS[0]}',
+        '--summary-file ${TARGETS[1]}',
+        '--log-file ${TARGETS[2]}',
+        '--lasso-param-ratios 0',
+        '--group-lasso-params 0',
+        '--is-relu',
+        c['is_relu'],
+        '--ridge-params',
+        make_params(np.power(10, np.arange(.25, -2.5, step=-.5))),
+        '--hidden-size-options',
+	RIDGE_HLA_hyperparams[c['hla']]['hidden_layers'],
+        '--data-classes 0',
+        '--kfold',
+        KFOLD,
+        '--max-iters',
+        MAX_ITERS,
+        '--num-inits',
+        NUM_INITS,
+        '--num-jobs',
+        NUM_JOBS,
+        '--learn-rate',
+        0.01,
+    ]
+    return env.Command([
+            join(outdir, 'fitted_ridge_nn.pkl'),
+            join(outdir, 'fitted_ridge_nn.csv'),
+            join(outdir, 'log_ridge.txt')
+        ],
+        c['read_data'],
+        ' '.join(map(str, cmd)))
