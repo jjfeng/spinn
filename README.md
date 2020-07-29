@@ -1,5 +1,7 @@
 # Sparse-Input Neural Network
 
+Jean Feng and Noah Simon. "Sparse-Input Neural Networks for High-dimensional Nonparametric Regression and Classification." https://arxiv.org/abs/1711.07592
+
 ## Installation:
 Install Tensorflow (python).
 
