@@ -2,6 +2,8 @@
 
 Jean Feng and Noah Simon. "Sparse-Input Neural Networks for High-dimensional Nonparametric Regression and Classification." https://arxiv.org/abs/1711.07592
 
+Note: For the latest iteration of this work, see Jean Feng and Noah Simon. "Ensembled sparse-input hierarchical networks for high-dimensional datasets." https://arxiv.org/abs/2005.04834
+
 ## Installation:
 Install Tensorflow (python).
 
